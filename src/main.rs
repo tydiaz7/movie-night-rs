@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::env;
+use rand::Rng;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use serde_json::{Result, Value};
 
 use serenity::async_trait;
 use serenity::framework::standard::macros::{command, group, hook};
@@ -9,6 +11,7 @@ use serenity::framework::standard::{Args, CommandResult, StandardFramework};
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
+use serenity::utils::MessageBuilder;
 use tokio::sync::RwLock;
 
 // A container type is created for inserting into the Client's `data`, which
@@ -38,11 +41,11 @@ impl TypeMapKey for MessageCount {
 struct MovieSuggestions;
 
 impl TypeMapKey for MovieSuggestions {
-    type Value = Arc<[String; String]>;
+    type Value = Arc<String>;
 }
 
 #[group]
-#[commands(ping, command_usage, owo_count, movie_suggestions)]
+#[commands(ping, command_usage, uwu_count, movie_suggestions, add)]
 struct General;
 
 #[hook]
@@ -83,8 +86,20 @@ struct Handler;
 impl EventHandler for Handler {
     async fn message(&self, ctx: Context, msg: Message) {
         if msg.author.id != ctx.cache.current_user_id()
-           && msg.content.to_lowercase().contains("owo")
+           && msg.content.to_lowercase().contains("uwu")
         {
+            let determinator: u8 = rand::thread_rng().gen();
+                if determinator == 12 {
+                    let uwu_response = MessageBuilder::new().push("OwO").build();
+                    if let Err(why) = msg.channel_id.say(&ctx.http, &uwu_response).await {
+                        println!("Error sending message: {:?}", why);
+                    };
+                } else {
+                    let uwu_response = MessageBuilder::new().push("UwU").build();
+                    if let Err(why) = msg.channel_id.say(&ctx.http, &uwu_response).await {
+                        println!("Error sending message: {:?}", why);
+                    };
+                }
             // Since data is located in Context, this means you are also able to use it within events!
             let count = {
                 let data_read = ctx.data.read().await;
@@ -92,12 +107,30 @@ impl EventHandler for Handler {
             };
 
             // Here, we are checking how many "owo" there are in the message content.
-            let owo_in_msg = msg.content.to_ascii_lowercase().matches("owo").count();
+            let uwu_in_msg = msg.content.to_ascii_lowercase().matches("uwu").count();
 
             // Atomic operations with ordering do not require mut to be modified.
             // In this case, we want to increase the message count by 1.
             // https://doc.rust-lang.org/std/sync/atomic/struct.AtomicUsize.html#method.fetch_add
-            count.fetch_add(owo_in_msg, Ordering::SeqCst);
+            count.fetch_add(uwu_in_msg, Ordering::SeqCst);
+        }
+        if msg.author.id != ctx.cache.current_user_id() {
+            let movie_sugg = {
+                let data_read = ctx.data.read().await;
+                data_read.get::<MovieSuggestions>().expect("Expected MovieSuggestions in TypeMap").clone()
+            };
+            let is_movie = msg.content.to_ascii_lowercase().contains("movie");
+            if is_movie {
+                // movie_sugg.(msg.content, Ordering::Relaxed);
+                let response = MessageBuilder::new()
+                .push("User ")
+                .push_bold_safe(&msg.author.name)
+                .push(" added a movie.")
+                .build();
+                if let Err(why) = msg.channel_id.say(&ctx.http, &response).await {
+                    println!("Error sending message: {:?}", why);
+                };
+            }
         }
     }
 
@@ -213,7 +246,7 @@ async fn command_usage(ctx: &Context, msg: &Message, mut args: Args) -> CommandR
 }
 
 #[command]
-async fn owo_count(ctx: &Context, msg: &Message) -> CommandResult {
+async fn uwu_count(ctx: &Context, msg: &Message) -> CommandResult {
     let raw_count = {
         let data_read = ctx.data.read().await;
         data_read.get::<MessageCount>().expect("Expected MessageCount in TypeMap.").clone()
@@ -224,11 +257,11 @@ async fn owo_count(ctx: &Context, msg: &Message) -> CommandResult {
     if count == 1 {
         msg.reply(
                 ctx,
-        "You are the first one to say owo this session! *because it's on the command name* :P",
+        "You are the first one to say uwu this session! *because it's on the command name* :P",
         )
         .await?;
     } else {
-        msg.reply(ctx, format!("OWO Has been said {} times!", count)).await?;
+        msg.reply(ctx, format!("UWU Has been said {} times!", count)).await?;
     }
 
     Ok(())
@@ -244,3 +277,41 @@ async fn movie_suggestions(ctx: &Context, msg: &Message) -> CommandResult {
     msg.reply(ctx, format!("I have no idea what I'm doing lul {}", raw_list)).await?;
     Ok(())
 }
+
+#[command]
+async fn add(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let imdb_url = match args.single_quoted::<String>() {
+        Ok(x) => x,
+        Err(_) => {
+            msg.reply(ctx, "I require an argument to run this command.").await?;
+            return Ok(());
+        },
+    };
+    // TODO: Account for movie title only (Nice to have)? or IMDb ID only
+    // Scrape message embed instead?
+    let split: usize = {
+        if imdb_url.starts_with("https") {
+            4
+        } else {
+            2
+        }
+    };
+        let imdb_id = imdb_url.split("/").nth(split).unwrap();
+        msg.reply(ctx, format!("I think this is the ID from the URL given: {}", imdb_id)).await;
+        let res = reqwest::get(format!("https://api.themoviedb.org/3/find/{}?api_key=26dddc9c9f07cfa0d8930cb732dc6400&language=en-US&external_source=imdb_id", imdb_id)).await?.text().await?;
+        let json_res: Value = serde_json::from_str(&res)?; // TODO: MovieObject
+        println!("{}",json_res["movie_results"][0]["title"]);
+        let tmbd_info = MessageBuilder::new()
+            .push("Movie title: ")
+            .push_safe(&json_res["movie_results"][0]["title"])//+6
+//                        +36+
+//                        +++++++++++++++++++++++++++3333333333333333333333333333333333333333333333333333333333333333333333
+            .push("\nSynopsis: ")
+            .push_safe(&json_res["movie_results"][0]["overview"])
+            .build();
+        if let Err(why) = msg.channel_id.say(&ctx.http, &tmbd_info).await {
+            println!("Error sending message: {:?}", why);
+        };
+    Ok(())
+}
+
